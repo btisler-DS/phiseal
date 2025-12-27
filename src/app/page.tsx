@@ -1,65 +1,114 @@
-import Image from "next/image";
+﻿"use client";
+
+import { useMemo, useState } from "react";
+import { evaluateReasoningState } from "@/lib/phiseal/evaluator";
+import { enforceGate } from "@/lib/phiseal/gate";
+import { runSelfTest, type SelfTestResult } from "@/lib/phiseal/selftest";
+import type { GateLogEntry, ReasoningState } from "@/lib/phiseal/types";
 
 export default function Home() {
+  const [input, setInput] = useState<string>("");
+  const [currentState, setCurrentState] = useState<ReasoningState>("INITIAL");
+  const [logs, setLogs] = useState<GateLogEntry[]>([]);
+  const [selfTestResults, setSelfTestResults] = useState<SelfTestResult[] | null>(null);
+
+  const metrics = useMemo(() => {
+    const stateCounts: Record<string, number> = {};
+    for (const l of logs) stateCounts[l.new_state] = (stateCounts[l.new_state] ?? 0) + 1;
+    return { total: logs.length, stateCounts };
+  }, [logs]);
+
+  function handleEvaluateAndEnforce() {
+    const evalResult = evaluateReasoningState(input);
+    const action = enforceGate(evalResult.state);
+
+    const entry: GateLogEntry = {
+      timestamp: new Date().toISOString(),
+      previous_state: currentState,
+      new_state: evalResult.state,
+      action,
+      confidence: evalResult.confidence,
+      signals: evalResult.signals,
+      input_excerpt: input.slice(0, 140)
+    };
+
+    setCurrentState(evalResult.state);
+    setLogs((prev) => [...prev, entry]);
+  }
+
+  function handleRunSelfTest() {
+    const results = runSelfTest((text) => {
+      const r = evaluateReasoningState(text);
+      return { ...r, action: enforceGate(r.state) };
+    });
+    setSelfTestResults(results);
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="mx-auto max-w-4xl p-6">
+      <h1 className="text-2xl font-semibold">PhiSeal Runtime Gate v1.0</h1>
+
+      <div className="mt-6 grid gap-3">
+        <label className="text-sm font-semibold">INPUT REASONING STREAM</label>
+        <textarea
+          className="min-h-[140px] w-full rounded border p-3 text-sm"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Paste a thought, question, or AI output here..."
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+
+        <div className="flex flex-wrap gap-2">
+          <button onClick={handleEvaluateAndEnforce} className="rounded bg-black px-4 py-2 text-sm font-semibold text-white">
+            EVALUATE_AND_ENFORCE
+          </button>
+          <button onClick={handleRunSelfTest} className="rounded border border-black px-4 py-2 text-sm font-semibold">
+            Run Self-Test
+          </button>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="flex flex-wrap gap-3 text-sm">
+          <div className="rounded border px-3 py-2">
+            <span className="font-semibold">Current Node State:</span> {currentState}
+          </div>
+          <div className="rounded border px-3 py-2">
+            <span className="font-semibold">Total Logs:</span> {metrics.total}
+          </div>
         </div>
-      </main>
-    </div>
+
+        {selfTestResults && (
+          <section className="rounded border p-3">
+            <h2 className="text-lg font-semibold">Self-Test Results</h2>
+            <ul className="mt-2 list-disc pl-5 text-sm">
+              {selfTestResults.map((r) => (
+                <li key={r.name} className="mb-1">
+                  <span className="font-semibold">{r.pass ? "PASS" : "FAIL"}</span> — {r.name} | expected{" "}
+                  {r.expected.state}/{r.expected.action} | actual {r.actual.state}/{r.actual.action}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <section className="rounded border p-3">
+          <h2 className="text-lg font-semibold">STATE_TRANSITION_LOGS</h2>
+          <div className="mt-2 grid gap-2 text-sm">
+            {logs.length === 0 && <div className="opacity-70">No logs yet.</div>}
+            {logs
+              .slice()
+              .reverse()
+              .map((l, idx) => (
+                <div key={`${l.timestamp}-${idx}`} className="rounded border p-3">
+                  <div className="font-mono text-xs">
+                    {l.timestamp} | {l.previous_state} → {l.new_state} | {l.action} | conf={l.confidence.toFixed(2)}
+                  </div>
+                  <div className="mt-1 text-xs opacity-80">
+                    signals: {l.signals.join(", ") || "(none)"} | input: “{l.input_excerpt}”
+                  </div>
+                </div>
+              ))}
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }
